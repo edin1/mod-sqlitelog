@@ -1,22 +1,25 @@
 {
-  "name": "couchdb",
+  "name": "sqlitelog",
   "types": ["module"],
   "version": "1.4",
-  "homepage": "http://github.com/shinken-monitoring/mod-couchdb",
-  "author": "Jean Gabès",
-  "description": "Shinken module for sending data to a couchdb server",
+  "homepage": "http://github.com/edin1/mod-sqlitelog",
+  "author": "Jean Gabès, edin1",
+  "description": "Shinken module for sending data to a sqlite database",
   "contributors": [
     {
       "name": "Jean Gabès",
       "email": "naparuba@gmail.com"
+    },
+    {
+      "name": "edin1",
     }
   ],
-  "repository": "https://github.com/shinken-monitoring/mod-couchdb",
+  "repository": "https://github.com/edin1/mod-sqlitelog",
   "keywords": [
     "module",
     "broker",
-    "couchdb",
-    "nosql"
+    "sqlite",
+    "sqlitelog"
   ],
   "dependencies": {
     "shinken": ">=1.4"

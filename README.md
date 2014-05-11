@@ -1,4 +1,4 @@
-mod-couchdb
-===========
+mod-sqlitelog
+=============
 
-Shinken module for sending data to a couchdb server
+Shinken module for storing data in a sqlite database.
