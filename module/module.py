@@ -1,4 +1,5 @@
 #!/usr/bin/python
+#!/usr/bin/python
 
 # -*- coding: utf-8 -*-
 
@@ -22,74 +23,96 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with Shinken.  If not, see <http://www.gnu.org/licenses/>.
-
+import os
 import copy
-couchdb = None
-socket = None
+
+old_implementation = False
 try:
-    # Failed import will be caught by __init__.py
-    import couchdb as couchdb_imp
-    couchdb = couchdb_imp
-except ImportError:
-    pass
-import socket as socket_imp  # For Nagle HACK
-socket = socket_imp
+    import sqlite3
+except ImportError: # python 2.4 do not have it
+    try:
+        import pysqlite2.dbapi2 as sqlite3 # but need the pysqlite2 install from http://code.google.com/p/pysqlite/downloads/list
+    except ImportError: # python 2.4 do not have it
+        import sqlite as sqlite3 # one last try
+        old_implementation = True
 
 from shinken.basemodule import BaseModule
+from shinken.log import logger
+
 
 
 properties = {
     'daemons': ['broker'],
-    'type': 'couchdb',
+    'type': 'sqlitelog',
     'phases': ['running'],
     }
 
 
 # called by the plugin manager to get a broker
 def get_instance(plugin):
-
-    print "Get a Couchdb broker for plugin %s" % plugin.get_name()
-
-    if not couchdb:
-        logger.error("Error : cannot import couchdb module, so the plugin %s cannot load" % plugin.get_name())
-        return None
-
-    # TODO: catch errors
-    host = plugin.host
-    user = plugin.user
-    password = plugin.password
-    instance = Couchdb_broker(plugin, host, user, password)
+    logger.info("Get a sqlitelog log broker for plugin %s" % plugin.get_name())
+    instance = SQLiteLog_broker(plugin)
     return instance
 
 
 
 
-class Couchdb_broker(BaseModule):
+class SQLiteLog_broker(BaseModule):
     """
      This Class is a plugin for the Shinken Broker. It is in charge
-     to brok information into the merlin database. for the moment
-     only Mysql is supported. This code is __imported__ from Broker.
-     The managed_brok function is called by Broker for manage the broks. It calls
-     the manage_*_brok functions that create queries, and then run queries.
+     to brok information into the SQLite database. This code is __imported__
+     from Broker.  The managed_brok function is called by Broker for manage
+     the broks. It calls the manage_*_brok functions that create queries,
+     and then run queries.
 
     """
 
-    def __init__(self, modconf, host, user, password):
+    def __init__(self, modconf):
         BaseModule.__init__(self, modconf)
-        self.host = host
-        self.user = user
-        self.password = password
+        self.path = getattr(modconf, 'path',
+                        os.path.join(os.path.abspath('.'), 'sqlitelog.db'))
+        self.db = None
 
-    # Called by Broker so we can do init stuff
+    # Called by Broker to initialize whatever is needed
     def init(self):
-        print "I connect to Couchdb database"
-        self.connect_database()
+        logger.info("Try to open SQLite database at %s" % (self.path))
+        try:
+            self.db = sqlite3.connect(self.path, check_same_thread=False)
+        except Exception, e:
+            logger.error("Error %s:" % e)
+            raise
+        logger.info("Opened connection to SQLite database OK")
 
-    # Get a brok, parse it, and put in in database
-    # We call functions like manage_ TYPEOFBROK _brok that return us queries
-    def manage_brok(self, b):
-        # We will transform data of b, so copy it
-        return BaseModule.manage_brok(self, copy.deepcopy(b))
+        cmd = """CREATE TABLE IF NOT EXISTS logs(
+                     type TEXT,
+                     data TEXT
+                     -- logobject INT,
+                     -- attempt INT,
+                     -- class INT,
+                     -- command_name VARCHAR(64),
+                     -- comment VARCHAR(256),
+                     -- contact_name VARCHAR(64),
+                     -- host_name VARCHAR(64),
+                     -- lineno INT,
+                     -- message VARCHAR(512),
+                     -- options VARCHAR(512),
+                     -- plugin_output VARCHAR(256),
+                     -- service_description VARCHAR(64),
+                     -- state INT,
+                     -- state_type VARCHAR(10),
+                     -- time INT,
+                     -- type VARCHAR(64)
+                     )
+                     """
+        self.db.execute(cmd)
+        # cmd = "CREATE INDEX IF NOT EXISTS logs_time ON logs (time)"
+        # self.db.execute(cmd)
+        # cmd = "CREATE INDEX IF NOT EXISTS logs_host_name ON logs (host_name)"
+        # self.db.execute(cmd)
+        cmd = "PRAGMA journal_mode=truncate"
+        self.db.execute(cmd)
+
+        self.db.commit()
 
     # Create the database connection
     # TODO: finish (begin :) ) error catch and conf parameters...
@@ -125,50 +148,67 @@ class Couchdb_broker(BaseModule):
                 pass
             self.dbs[table] = s.create(table)
 
+
+    # Get a brok, parse it, and put in in database
+    # We call functions like manage_ TYPEOFBROK _brok that return us queries
+    def manage_brok(self, b):
+        # We will transform data of b, so copy it
+        return BaseModule.manage_brok(self, copy.deepcopy(b))
+
     # Create a document table with all data of data (a dict)
     def create_document(self, table, data, key):
-        db = self.dbs[table]
+        cmd = "INSERT INTO logs (type, data) VALUES (?, ?)"
+        self.db.execute(cmd, (table, repr(data)))
+        self.db.commit()
+        # myprint(table, data, key)
 
-        # Couchdb index is _id
-        if key is not None:
-            data['_id'] = key
-
-        # Now stringify datas in UTF-8
-        for prop in data:
-            val = data[prop]
-
-            if isinstance(val, str):
-                data[prop] = val.decode('utf-8')
-                data[prop].replace("'", "''")
-            else:
-                data[prop] = val
-        db.create(data)
+        # db = self.dbs[table]
+        #
+        # # Couchdb index is _id
+        # if key is not None:
+        #     data['_id'] = key
+        #
+        # # Now stringify datas in UTF-8
+        # for prop in data:
+        #     val = data[prop]
+        #
+        #     if isinstance(val, str):
+        #         data[prop] = val.decode('utf-8')
+        #         data[prop].replace("'", "''")
+        #     else:
+        #         data[prop] = val
+        # db.create(data)
 
     # Update a document into a table with data
     def update_document(self, table, data, key):
-        db = self.dbs[table]
+        cmd = "INSERT INTO logs (type, data) VALUES (?, ?)"
+        self.db.execute(cmd, (table, repr(data)))
+        self.db.commit()
+        # myprint(table, data, key)
 
-        # Couchdb index is _id
-        if key is not None:
-            data['_id'] = key
-
-        # We take the original doc to update it
-        doc = db[key]
-        # TODO: find a better way of not having too much revisions...
-        db.delete(doc)
-
-        # Now stringify datas
-        for prop in data:
-            val = data[prop]
-
-            if isinstance(val, str):
-                data[prop] = val.decode('utf-8')
-                data[prop].replace("'", "''")
-            else:
-                data[prop] = val
-
-            doc[prop] = data[prop]
-        db.update([doc])
+        # db = self.dbs[table]
+        #
+        # # Couchdb index is _id
+        # if key is not None:
+        #     data['_id'] = key
+        #
+        # # We take the original doc to update it
+        # doc = db[key]
+        # # TODO: find a better way of not having too much revisions...
+        # db.delete(doc)
+        #
+        # # Now stringify datas
+        # for prop in data:
+        #     val = data[prop]
+        #
+        #     if isinstance(val, str):
+        #         data[prop] = val.decode('utf-8')
+        #         data[prop].replace("'", "''")
+        #     else:
+        #         data[prop] = val
+        #
+        #     doc[prop] = data[prop]
+        # db.update([doc])
 
     # Ok, we are at launch and a scheduler want him only, OK...
     # So it creates several queries with all tables we need to delete with
@@ -293,3 +333,9 @@ class Couchdb_broker(BaseModule):
     # Override abstract method
     def do_loop_turn(self):
         pass
+
+def myprint(*args):
+    if args[0] == 'program_status':
+        return
+    import pprint
+    raise Exception(pprint.pformat(args))
