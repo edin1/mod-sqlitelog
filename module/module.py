@@ -330,6 +330,9 @@ class SQLiteLog_broker(BaseModule):
     def manage_notification_raise_brok(self, b):
         self.create_document('notifications', b.data, b.data['id'])
 
+    def manage_log_brok(self, b):
+        self.create_document('log', b.data, 'id')
+
     # Override abstract method
     def do_loop_turn(self):
         pass
